@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {pipeline} from 'node:stream/promises';
+import {createHash} from 'node:crypto';
 import {Readable} from 'node:stream';
 import {validateComposition,makeMusic} from './composition.mjs';
 
@@ -30,6 +31,10 @@ async function animate(source,ratio,composition,music,background){const [w,h]=ra
 }
 async function processJob(id){let row=await api(`/table/${TABLE}/record/${id}?fieldKeyType=id`),f=row.fields||{};if(f[F.status]!=='Queued'){console.log('Job not queued; skipped');return;}
  if(!String(f[F.name]||'').trim()||!f[F.source]?.length||!['9:16','16:9'].includes(f[F.ratio])||!['English','Español'].includes(f[F.language])){await update(id,{[F.status]:'Needs Review',[F.error]:'Missing or invalid required inputs'});return;}
+ let oldContext={};try{oldContext=JSON.parse(f[AI.context]||'{}');}catch{}
+ const inputFingerprint=createHash('sha256').update(JSON.stringify({sources:f[F.source].map(a=>({token:a.token||a.id||a.name,size:a.size})),ratio:f[F.ratio],language:f[F.language],instructions:f[F.instructions]||''})).digest('hex');
+ if(oldContext.inputFingerprint&&oldContext.inputFingerprint!==inputFingerprint){await update(id,{[F.status]:'Needs Review',[F.error]:'Sources, language, ratio or instructions changed after AI preparation. Start a fresh job to preserve the existing Reap checkpoint.'});return;}
+ oldContext.inputFingerprint=inputFingerprint;await update(id,{[AI.context]:JSON.stringify(oldContext)});
  let started=false,runId;
  const log=async(fields)=>{if(runId)await api(`/table/tbleluZXeKU6uicWjiv/record/${runId}`,{fieldKeyType:'id',typecast:true,record:{fields}},'PATCH');};
  try{
@@ -41,7 +46,7 @@ async function processJob(id){let row=await api(`/table/${TABLE}/record/${id}?fi
   const sources=[];
   if(parts.length>8)throw Error('At most eight source videos supported');
   for(let i=0;i<parts.length;i++){const m=probe(parts[i]),duration=Number(m.format.duration);if(duration<3||duration>900)throw Error('Each source must be 3 seconds to 15 minutes');const preview=path.join(WORK,`preview-${i}.jpg`);run('ffmpeg',['-v','error','-y','-i',parts[i],'-vf',`fps=6/${duration},scale=240:420:force_original_aspect_ratio=decrease,pad=240:420:(ow-iw)/2:(oh-ih)/2,tile=3x2`,'-frames:v','1','-q:v','3',preview]);await attach(id,AI.preview,preview,'image/jpeg');sources.push({index:i,name:f[F.source][i].name,duration,width:m.streams.find(s=>s.codec_type==='video')?.width,height:m.streams.find(s=>s.codec_type==='video')?.height,previewName:`preview-${i}.jpg`,sampleTimes:Array.from({length:6},(_,n)=>Number((n*duration/6).toFixed(2)))});}
-  await update(id,{[AI.context]:JSON.stringify({version:2,sources,ratio:f[F.ratio],language:f[F.language],existingReapProject:!!f[F.reap],limitations:'Visual samples only; Reap handles speech captions. Do not invent spoken claims.'}),[F.status]:'Planning',[F.error]:null});await log({fldQKzITMb6gNWgM2dH:'Completed',fldgIL91GLIOXQgQdTJ:new Date().toISOString()});console.log('Visual previews prepared; waiting for Teable AI composition');return;
+  await update(id,{[AI.context]:JSON.stringify({version:2,inputFingerprint,sources,ratio:f[F.ratio],language:f[F.language],existingReapProject:!!f[F.reap],limitations:'Visual samples only; Reap handles speech captions. Do not invent spoken claims.'}),[F.status]:'Planning',[F.error]:null});await log({fldQKzITMb6gNWgM2dH:'Completed',fldgIL91GLIOXQgQdTJ:new Date().toISOString()});console.log('Visual previews prepared; waiting for Teable AI composition');return;
  }
  let plan;try{plan=JSON.parse(f[F.plan]);}catch{throw Error('AI edit plan is not valid JSON');}
  let input=parts[0];
