@@ -31,6 +31,8 @@ jobs:
           sudo apt-get install -y -qq ffmpeg fonts-noto-core
           npm install --no-audit --no-fund
           npx puppeteer browsers install chrome
+      - name: Check motion validation and music
+        run: node check-composition.mjs
       - name: Process video
         env:
           MODE: ${{ inputs.mode }}
