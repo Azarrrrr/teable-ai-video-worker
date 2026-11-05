@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   render:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-noto-core
           npm install --no-audit --no-fund
-          npx puppeteer browsers install chrome --install-deps
+          npx puppeteer browsers install chrome
       - name: Process video
         env:
           MODE: ${{ inputs.mode }}
