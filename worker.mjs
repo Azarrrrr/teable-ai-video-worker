@@ -40,7 +40,7 @@ async function processJob(id){let row=await api(`/table/${TABLE}/record/${id}?fi
  try{
  const created=await api('/table/tbleluZXeKU6uicWjiv/record',{fieldKeyType:'id',typecast:true,records:[{fields:{fldfae553TlohKfowBW:`video-${process.env.GITHUB_RUN_ID||Date.now()}`,fldYqZIWbMbU4LJmiJB:id,fldQKzITMb6gNWgM2dH:'Running',fld0Y6066ttBkdOtiQP:process.env.GITHUB_RUN_ID||'',fld3fn593xNRvnUZpjQ:new Date().toISOString()}}]});runId=created.records?.[0]?.id;
  for(const key of ['TEABLE_API_TOKEN','REAP_API_KEY','CLOUDINARY_NAME','CLOUDINARY_PRESET'])if(!process.env[key])throw Error('Worker credential missing: '+key);
- await update(id,{[F.status]:'Processing',[F.error]:null,[F.started]:new Date().toISOString(),[F.attempts]:Number(f[F.attempts]||0)+1});started=true;
+ await update(id,{[F.status]:'Processing',[F.error]:null,[F.completed]:null,[F.started]:new Date().toISOString(),[F.attempts]:Number(f[F.attempts]||0)+1});started=true;
  const parts=[];for(const [i,a] of f[F.source].entries()){const p=path.join(WORK,`source-${i}.mp4`);await download(a.presignedUrl||a.url,p);const m=probe(p);if(!m.streams.some(s=>s.codec_type==='audio'))throw Error('Source has no audio; cannot create speech captions');parts.push(p);}
  if(!f[AI.html]){
   const sources=[];
