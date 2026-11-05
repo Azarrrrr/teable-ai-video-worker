@@ -1,0 +1,3 @@
+import assert from 'node:assert/strict';import {readWords,remapWords,makeSrt} from './subtitles.mjs';
+const a=readWords([{word:'one',startMs:1000,endMs:1400},{word:'two',startMs:2000,endMs:2400}],4);const b=readWords([{word:'tres',startMs:500,endMs:900}],2);
+const mapped=remapWords([{words:a},{words:b}],[{sourceIndex:1,start:0,end:1},{sourceIndex:0,start:1.5,end:3}]);assert.deepEqual(mapped.words,[{text:'tres',start:.5,end:.9},{text:'two',start:1.5,end:1.9}]);assert.equal(mapped.duration,2.5);assert.match(makeSrt(mapped.words),/00:00:00,500/);assert.ok(!makeSrt(mapped.words).includes('one'));assert.throws(()=>readWords([{word:'bad',startMs:100,endMs:50}],1));console.log('Subtitle timestamp units, multi-source reorder/trim and SRT checks passed');

@@ -32,7 +32,7 @@ jobs:
           npm install --no-audit --no-fund
           npx puppeteer browsers install chrome
       - name: Check motion validation and music
-        run: node check-composition.mjs
+        run: node check-composition.mjs && node check-subtitles.mjs
       - name: Process video
         env:
           MODE: ${{ inputs.mode }}
