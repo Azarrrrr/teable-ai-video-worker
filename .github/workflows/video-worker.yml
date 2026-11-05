@@ -1,0 +1,42 @@
+name: Video Worker
+on:
+  workflow_dispatch:
+    inputs:
+      jobRecordId:
+        description: Teable video job record ID
+        required: false
+        type: string
+      mode:
+        description: Execution mode
+        type: choice
+        options: [job, selftest]
+        default: job
+permissions:
+  contents: read
+concurrency:
+  group: video-production-worker
+  cancel-in-progress: false
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install video tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-core
+          npm install --no-audit --no-fund
+          npx puppeteer browsers install chrome --install-deps
+      - name: Process video
+        env:
+          MODE: ${{ inputs.mode }}
+          JOB_ID: ${{ inputs.jobRecordId }}
+          TEABLE_API_TOKEN: ${{ secrets.TEABLE_API_TOKEN }}
+          REAP_API_KEY: ${{ secrets.REAP_API_KEY }}
+          CLOUDINARY_NAME: ${{ secrets.CLOUDINARY_NAME }}
+          CLOUDINARY_PRESET: ${{ secrets.CLOUDINARY_PRESET }}
+        run: node worker.mjs
