@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {parseSupplied,alignSupplied,reviewTimes} from './input-subtitles.mjs';
+const srt='1\n00:00:00,000 --> 00:00:01,500\nHello there\n\n2\n00:00:02,000 --> 00:00:03,000\nNext line';
+assert.deepEqual(parseSupplied(srt,4).words,[{text:'Hello there',start:0,end:1.5},{text:'Next line',start:2,end:3}]);
+assert.equal(parseSupplied('WEBVTT\n\n00:00.500 --> 00:01.500\nHola',2).words[0].start,.5);
+assert.throws(()=>parseSupplied(srt,2),/exceed/);
+assert.throws(()=>parseSupplied('00:02.000 --> 00:01.000\nwrong',4));
+const recognized=[{text:'hello',start:.2,end:.5},{text:'world',start:.6,end:.9},{text:'today',start:1,end:1.5}];
+assert.equal(alignSupplied('Hello world today',recognized)[0].text,'Hello');
+assert.throws(()=>alignSupplied('Completely unrelated text',recognized),/match/);
+const times=reviewTimes([{start:0,end:10},{start:10,end:20}],[{start:4,end:6}],20);
+assert(times.includes(5)&&times.includes(9.8)&&times.includes(10.2)&&times.includes(19.9));
+console.log('PASS: SRT/VTT source cue timing, validation, corrected text alignment and temporal sampling');
