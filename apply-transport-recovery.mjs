@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+let w=fs.readFileSync('worker.mjs','utf8');
+if(!w.includes("from './transport.mjs'")){
+ const patch=(a,b)=>{if(!w.includes(a))throw Error('Worker changed; patch refused: '+a.slice(0,60));w=w.replace(a,b);};
+ patch("import {parseSupplied,alignSupplied,reviewTimes} from './input-subtitles.mjs';","import {parseSupplied,alignSupplied,reviewTimes} from './input-subtitles.mjs';\nimport {makeRequest,uploadOnce} from './transport.mjs';");
+ patch("async function request(url,init={}){const r=await fetch(url,{...init,signal:AbortSignal.timeout(120000)});if(!r.ok)throw Error(`Request failed (${r.status})`);return r;}","const request=makeRequest();");
+ patch("async function attach(id,field,file,mime){const form=new FormData();form.set('file',new Blob([await fs.readFile(file)],{type:mime}),path.basename(file));return api(`/table/${TABLE}/record/${id}/${field}/uploadAttachment`,form);}","const attachmentCache=new Map();\nasync function attach(id,field,file,mime){const bytes=await fs.readFile(file),name=path.basename(file);const upload=async()=>{const form=new FormData();form.set('file',new Blob([bytes],{type:mime}),name);return api(`/table/${TABLE}/record/${id}/${field}/uploadAttachment`,form);};\n if(![AI.preview,'fldUiKDtSmDmy8BzKuc'].includes(field))return upload();\n return uploadOnce({known:attachmentCache.get(field)||[],name,size:bytes.length,upload,reconcile:async()=>{const row=await api(`/table/${TABLE}/record/${id}?fieldKeyType=id`);const saved=row.fields?.[field]||[];attachmentCache.set(field,saved);return saved;}});}");
+ patch("oldContext.inputFingerprint=inputFingerprint;await update","for(const field of [AI.preview,'fldUiKDtSmDmy8BzKuc'])attachmentCache.set(field,f[field]||[]);\n oldContext.inputFingerprint=inputFingerprint;await update");
+ patch("const batch=times.slice(b*6,b*6+6);const files=[];","const boardName='analysis-'+i+'-'+b+'.jpg';\n    if(!oldContext.refreshVisualSamples&&(f[AI.preview]||[]).some(a=>a.name===boardName)){console.log('Reused saved source analysis '+boardName);boards.push(boardName);continue;}\n    console.log('Preparing source analysis '+boardName);const batch=times.slice(b*6,b*6+6);const files=[];");
+ fs.writeFileSync('worker.mjs',w);
+}
+const p='.github/workflows/video-worker.yml';let y=fs.readFileSync(p,'utf8');if(!y.includes('node check-transport.mjs'))y=y.replace('node check-input-subtitles.mjs','node check-input-subtitles.mjs && node check-transport.mjs');fs.writeFileSync(p,y);

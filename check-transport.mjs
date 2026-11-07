@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';import {makeRequest,uploadOnce} from './transport.mjs';
+let calls=0;const logs=[];const request=makeRequest({fetchImpl:async()=>{if(++calls<3)throw new DOMException('operation aborted','TimeoutError');return {ok:true};},sleep:async()=>{},trace:l=>logs.push(l)});
+await request('https://example.test/signed?secret=hidden');assert.equal(calls,3);assert(!logs.join().includes('hidden'));
+calls=0;await assert.rejects(()=>request('https://example.test/api',{method:'POST'}));assert.equal(calls,1);
+const fatal=makeRequest({fetchImpl:async()=>({ok:false,status:401}),sleep:async()=>{},trace:()=>{}});await assert.rejects(()=>fatal('https://example.test'),/after 1 attempt/);
+let uploads=0;const saved={name:'analysis-0-1.jpg',size:10};
+await uploadOnce({known:[saved],...saved,upload:async()=>{uploads++;},reconcile:async()=>[],trace:()=>{}});assert.equal(uploads,0);
+await uploadOnce({known:[],...saved,upload:async()=>{uploads++;throw Error('request timeout');},reconcile:async()=>[saved],trace:()=>{}});assert.equal(uploads,1);
+uploads=0;await uploadOnce({known:[],...saved,upload:async()=>{if(++uploads===1)throw Error('request timeout');return saved;},reconcile:async()=>[],trace:()=>{}});assert.equal(uploads,2);
+uploads=0;await assert.rejects(()=>uploadOnce({known:[],...saved,upload:async()=>{uploads++;throw Error('request timeout');},reconcile:async()=>[],trace:()=>{}}),/twice/);assert.equal(uploads,2);
+console.log('PASS: bounded safe retries, no POST replay, saved-board reuse, upload reconciliation and redacted URL logs');
