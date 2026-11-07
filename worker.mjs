@@ -8,6 +8,7 @@ import {Readable} from 'node:stream';
 import {validateComposition,makeMusic} from './composition.mjs';
 import {readWords,remapWords,makeSrt} from './subtitles.mjs';
 import {parseSupplied,alignSupplied,reviewTimes} from './input-subtitles.mjs';
+import {makeRequest,uploadOnce} from './transport.mjs';
 
 const ENDPOINT='https://app.teable.ai';
 const TABLE='tbl8C5PSp8zMd0m8uFc';
@@ -16,13 +17,16 @@ const AI={html:'fldSdDHSQJ2iepWQOC8',context:'fldVfgtQMnT73gFMVqP',preview:'fldq
 const WORK=await fs.mkdtemp(path.join(os.tmpdir(),'video-job-'));
 const run=(cmd,args)=>execFileSync(cmd,args,{stdio:['ignore','pipe','pipe'],timeout:1800000,maxBuffer:10*1024*1024});
 const probe=file=>JSON.parse(run('ffprobe',['-v','error','-show_format','-show_streams','-of','json',file]));
-async function request(url,init={}){const r=await fetch(url,{...init,signal:AbortSignal.timeout(120000)});if(!r.ok)throw Error(`Request failed (${r.status})`);return r;}
+const request=makeRequest();
 async function api(route,body,method='POST'){const r=await request(`${ENDPOINT}/api${route}`,{method:body?method:'GET',headers:{Authorization:`Bearer ${process.env.TEABLE_API_TOKEN}`,...(body instanceof FormData?{}:{'Content-Type':'application/json'})},...(body?{body:body instanceof FormData?body:JSON.stringify(body)}:{})});return r.json();}
 const update=(id,fields)=>api(`/table/${TABLE}/record/${id}`,{fieldKeyType:'id',typecast:true,record:{fields}},'PATCH');
 async function download(url,file){if(new URL(url).protocol!=='https:')throw Error('Only HTTPS media URLs supported');const r=await request(url);const size=Number(r.headers.get('content-length')||0);if(size>500*1024*1024)throw Error('Input exceeds 500 MB limit');await pipeline(Readable.fromWeb(r.body),fsOpen(file));if((await fs.stat(file)).size>500*1024*1024)throw Error('Downloaded file exceeds limit');}
 import {createWriteStream as fsOpen} from 'node:fs';
 async function reap(route,body){const r=await request(`https://public.reap.video/api/v1/automation/${route}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${process.env.REAP_API_KEY}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return r.json();}
-async function attach(id,field,file,mime){const form=new FormData();form.set('file',new Blob([await fs.readFile(file)],{type:mime}),path.basename(file));return api(`/table/${TABLE}/record/${id}/${field}/uploadAttachment`,form);}
+const attachmentCache=new Map();
+async function attach(id,field,file,mime){const bytes=await fs.readFile(file),name=path.basename(file);const upload=async()=>{const form=new FormData();form.set('file',new Blob([bytes],{type:mime}),name);return api(`/table/${TABLE}/record/${id}/${field}/uploadAttachment`,form);};
+ if(![AI.preview,'fldUiKDtSmDmy8BzKuc'].includes(field))return upload();
+ return uploadOnce({known:attachmentCache.get(field)||[],name,size:bytes.length,upload,reconcile:async()=>{const row=await api(`/table/${TABLE}/record/${id}?fieldKeyType=id`);const saved=row.fields?.[field]||[];attachmentCache.set(field,saved);return saved;}});}
 async function animate(source,ratio,composition,music,background,onStage=async()=>{},draft=false){const [fullW,fullH]=ratio==='16:9'?[1920,1080]:[1080,1920];const w=fullW,h=fullH; await onStage({phase:'normalizing'});const normalized=path.join(WORK,'normalized.mp4');run('ffmpeg',['-v','error','-y','-i',source,'-vf',`scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30`,'-c:v','libx264','-preset','fast','-crf','22','-c:a','aac','-movflags','+faststart',normalized]);const duration=Number(probe(normalized).format.duration);
  let presenterTrack=[];
  if(composition?.includes('presenter.mp4')){
@@ -48,6 +52,7 @@ async function processJob(id){let row=await api(`/table/${TABLE}/record/${id}?fi
  if(!subtitleTexts.length&&f[F.subtitles])subtitleTexts.push(String(f[F.subtitles]));
  const inputFingerprint=createHash('sha256').update(JSON.stringify({sources:f[F.source].map(a=>({token:a.token||a.id||a.name,size:a.size})),ratio:f[F.ratio],language:f[F.language],instructions:f[F.instructions]||'',...(subtitleTexts.length?{subtitles:subtitleTexts}:{})})).digest('hex');
  if(oldContext.inputFingerprint&&oldContext.inputFingerprint!==inputFingerprint){await update(id,{[F.status]:'Needs Review',[F.error]:'Sources, language, ratio or instructions changed after AI preparation. Start a fresh job to preserve the existing Reap checkpoint.'});return;}
+ for(const field of [AI.preview,'fldUiKDtSmDmy8BzKuc'])attachmentCache.set(field,f[field]||[]);
  oldContext.inputFingerprint=inputFingerprint;await update(id,{[AI.context]:JSON.stringify(oldContext)});
  let started=false,runId;
  const log=async(fields)=>{if(runId)await api(`/table/tbleluZXeKU6uicWjiv/record/${runId}`,{fieldKeyType:'id',typecast:true,record:{fields}},'PATCH');};
@@ -85,7 +90,9 @@ async function processJob(id){let row=await api(`/table/${TABLE}/record/${id}?fi
    const times=[...Array.from({length:18},(_,n)=>n*Math.max(0,duration-.15)/17),...boundaries.slice(0,12)].sort((a,b)=>a-b).filter((v,n,a)=>n===0||v-a[n-1]>.18).slice(0,30);
    const boards=[];
    for(let b=0;b<Math.ceil(times.length/6);b++){
-    const batch=times.slice(b*6,b*6+6);const files=[];
+    const boardName='analysis-'+i+'-'+b+'.jpg';
+    if(!oldContext.refreshVisualSamples&&(f[AI.preview]||[]).some(a=>a.name===boardName)){console.log('Reused saved source analysis '+boardName);boards.push(boardName);continue;}
+    console.log('Preparing source analysis '+boardName);const batch=times.slice(b*6,b*6+6);const files=[];
     for(let n=0;n<batch.length;n++){const file=path.join(WORK,'cell-'+i+'-'+b+'-'+n+'.jpg');run('ffmpeg',['-v','error','-y','-ss',String(batch[n]),'-i',parts[i],'-vf',"scale=240:420:force_original_aspect_ratio=decrease,pad=240:420:(ow-iw)/2:(oh-ih)/2,drawtext=text='source "+i+"  "+batch[n].toFixed(2)+"s':fontcolor=white:fontsize=17:box=1:boxcolor=black@0.8:x=5:y=5",'-frames:v','1','-q:v','3',file]);files.push(file);}
     const list=path.join(WORK,'cells.txt');await fs.writeFile(list,files.map(x=>"file '"+x+"'").join('\n'));const preview=path.join(WORK,'analysis-'+i+'-'+b+'.jpg');run('ffmpeg',['-v','error','-y','-f','concat','-safe','0','-i',list,'-vf','tile=3x2','-frames:v','1','-q:v','3',preview]);await attach(id,AI.preview,preview,'image/jpeg');boards.push(path.basename(preview));
    }
